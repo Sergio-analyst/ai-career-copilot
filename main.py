@@ -11,6 +11,16 @@ def main():
 
     print(f"\nJobs found: {len(jobs)}")
 
+    if not jobs:
+        print("No vacancies to display.")
+        return
+
+    for i, job in enumerate(jobs, start=1):
+        print(f"\n[{i}] {job['title']}")
+        print(f"    Company:  {job['company'] or '—'}")
+        print(f"    Location: {job['location'] or '—'}")
+        print(f"    URL:      {job['url']}")
+
 
 if __name__ == "__main__":
     main()
