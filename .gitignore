@@ -28,3 +28,7 @@ Thumbs.db
 # Coverage
 .coverage
 htmlcov/
+
+browser_profile/
+__pycache__/
+*.pyc
