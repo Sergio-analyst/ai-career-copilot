@@ -1,36 +1,45 @@
 """
 LinkedIn Job Scraper
 
-Версия: v0.1.1
+Версия: v0.1.2
 
-Проверяем работу Playwright.
+Используем постоянный профиль браузера.
 """
+
+from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
 
+PROFILE_DIR = Path("browser_profile")
+
+
 def search_jobs(query: str):
     """
-    Пока просто открывает браузер
-    и переходит на Google.
+    Открывает браузер с постоянным профилем.
     """
 
     print(f"Searching LinkedIn for: {query}")
 
+    PROFILE_DIR.mkdir(exist_ok=True)
+
     with sync_playwright() as p:
 
-        browser = p.chromium.launch(
-            headless=False
+        context = p.chromium.launch_persistent_context(
+            user_data_dir=str(PROFILE_DIR),
+            headless=False,
         )
 
-        page = browser.new_page()
+        page = context.new_page()
 
-        page.goto("https://www.google.com")
+        page.goto("https://www.linkedin.com")
 
-        print("✅ Browser opened successfully!")
+        print("✅ LinkedIn opened!")
 
-        input("Press ENTER to close browser...")
+        print("Если это первый запуск — войди в свой аккаунт вручную.")
 
-        browser.close()
+        input("\nPress ENTER to close browser...")
+
+        context.close()
 
     return []
