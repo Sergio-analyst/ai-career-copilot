@@ -1,42 +1,54 @@
-"""
-LinkedIn Job Scraper
-
-Версия: v0.1.2
-
-Используем постоянный профиль браузера.
-"""
-
-from pathlib import Path
+from urllib.parse import quote
 
 from playwright.sync_api import sync_playwright
 
+from config.settings import (
+    HEADLESS,
+    LINKEDIN_URL,
+    PROFILE_DIR,
+    SEARCH_KEYWORDS,
+    SEARCH_LOCATION,
+)
 
-PROFILE_DIR = Path("browser_profile")
 
+def search_jobs():
 
-def search_jobs(query: str):
-    """
-    Открывает браузер с постоянным профилем.
-    """
-
-    print(f"Searching LinkedIn for: {query}")
-
-    PROFILE_DIR.mkdir(exist_ok=True)
+    search_url = (
+        "https://www.linkedin.com/jobs/search/"
+        f"?keywords={quote(SEARCH_KEYWORDS)}"
+        f"&location={quote(SEARCH_LOCATION)}"
+    )
 
     with sync_playwright() as p:
 
         context = p.chromium.launch_persistent_context(
-            user_data_dir=str(PROFILE_DIR),
-            headless=False,
+            user_data_dir=PROFILE_DIR,
+            headless=HEADLESS,
         )
 
         page = context.new_page()
 
-        page.goto("https://www.linkedin.com")
+        print("Opening LinkedIn...")
 
-        print("✅ LinkedIn opened!")
+        page.goto(
+            LINKEDIN_URL,
+            wait_until="domcontentloaded",
+            timeout=60000,
+        )
 
-        print("Если это первый запуск — войди в свой аккаунт вручную.")
+        page.wait_for_timeout(3000)
+
+        print("Opening Jobs Search...")
+
+        page.goto(
+            search_url,
+            wait_until="domcontentloaded",
+            timeout=60000,
+        )
+
+        page.wait_for_timeout(5000)
+
+        print(f"\nOpened:\n{search_url}")
 
         input("\nPress ENTER to close browser...")
 
