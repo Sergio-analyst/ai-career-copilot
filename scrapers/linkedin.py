@@ -1,154 +1,130 @@
 from urllib.parse import quote
 
-from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import sync_playwright
+from playwright.sync_api import TimeoutError
 
 from config.settings import (
-    HEADLESS,
     LINKEDIN_URL,
-    PROFILE_DIR,
     SEARCH_KEYWORDS,
     SEARCH_LOCATION,
+    PROFILE_DIR,
+    HEADLESS,
 )
 
-# How many vacancies to collect.
 MAX_JOBS = 10
 
-# LinkedIn renders slightly different markup for the jobs list depending on
-# whether the session is authenticated. We try known variants, in order.
-JOB_CARD_SELECTORS = [
-    "ul.jobs-search__results-list li",                          # logged-out / classic search results
-    "div.jobs-search-results-list li[data-occludable-job-id]",  # logged-in results (current layout)
-    "li.jobs-search-results__list-item",                        # alternate logged-in layout
-]
 
-# Selectors for the fields inside a single job card, in priority order.
-TITLE_LINK_SELECTORS = "a.base-card__full-link, a.job-card-container__link, a.job-card-list__title"
-COMPANY_SELECTORS = [
-    "h4.base-search-card__subtitle",
-    ".job-card-container__primary-description",
-    ".job-card-container__company-name",
-]
-LOCATION_SELECTORS = [
-    "span.job-search-card__location",
-    ".job-card-container__metadata-item",
-]
+def search_jobs():
+    jobs = []
 
-
-def _first_text(card, selectors: list[str]) -> str:
-    """Return the inner text of the first selector (from `selectors`) that
-    matches inside `card`, or "" if none match. Never raises."""
-    for selector in selectors:
-        try:
-            locator = card.locator(selector)
-            if locator.count() > 0:
-                return locator.first.inner_text(timeout=5000).strip()
-        except PlaywrightTimeoutError:
-            continue
-        except Exception:
-            continue
-    return ""
-
-
-def _extract_job(card) -> dict | None:
-    """Extract {title, company, location, url} from a single job card.
-
-    Returns None (instead of raising) if the card doesn't look like a
-    real job listing, so one bad card can't crash the whole scrape.
-    """
-    try:
-        link = card.locator(TITLE_LINK_SELECTORS).first
-        if link.count() == 0:
-            return None
-
-        title = link.inner_text(timeout=5000).strip()
-        url = link.get_attribute("href", timeout=5000) or ""
-
-        if not title or not url:
-            return None
-
-        company = _first_text(card, COMPANY_SELECTORS)
-        location = _first_text(card, LOCATION_SELECTORS)
-
-        return {
-            "title": title,
-            "company": company,
-            "location": location,
-            "url": url,
-        }
-    except PlaywrightTimeoutError:
-        return None
-    except Exception:
-        return None
-
-
-def search_jobs() -> list[dict]:
-    """Open LinkedIn Jobs search and return up to MAX_JOBS vacancies.
-
-    Each item is {"title": str, "company": str, "location": str, "url": str}.
-    Never raises on scraping/navigation failures: on any problem (LinkedIn
-    layout change, no results, network hiccup) this prints a message and
-    returns whatever was collected so far (possibly an empty list).
-    """
     search_url = (
         "https://www.linkedin.com/jobs/search/"
         f"?keywords={quote(SEARCH_KEYWORDS)}"
         f"&location={quote(SEARCH_LOCATION)}"
     )
 
-    jobs: list[dict] = []
+    with sync_playwright() as p:
+        browser = p.chromium.launch_persistent_context(
+            user_data_dir=PROFILE_DIR,
+            headless=HEADLESS,
+        )
 
-    try:
-        with sync_playwright() as p:
-            context = p.chromium.launch_persistent_context(
-                user_data_dir=PROFILE_DIR,
-                headless=HEADLESS,
+        page = browser.new_page()
+
+        print("Opening LinkedIn...")
+
+        page.goto(
+            LINKEDIN_URL,
+            wait_until="domcontentloaded",
+            timeout=60000,
+        )
+        print(page.title())
+        print(page.url)
+
+        input("Press ENTER...")
+
+        try:
+            page.wait_for_load_state(
+                "networkidle",
+                timeout=10000,
             )
+        except TimeoutError:
+            pass
+
+        print("Opening Jobs Search...")
+
+        page.goto(
+            search_url,
+            wait_until="domcontentloaded",
+            timeout=60000,
+        )
+        print(page.title())
+        print(page.url)
+
+        input("Press ENTER...")
+
+        try:
+            page.wait_for_selector(
+                "div.job-card-container",
+                timeout=20000,
+            )
+        except TimeoutError:
+            print("\nNo vacancies found.")
+            browser.close()
+            return []
+
+        print()
+        print("Search page loaded.")
+        print()
+
+        cards = page.locator("div.job-card-container")
+
+        total = cards.count()
+
+        if total > MAX_JOBS:
+            total = MAX_JOBS
+
+        for i in range(total):
+
+            card = cards.nth(i)
 
             try:
-                page = context.new_page()
+                link = card.locator("a.job-card-container__link").first
 
-                print("Opening LinkedIn...")
-                page.goto(LINKEDIN_URL, wait_until="domcontentloaded", timeout=60000)
+                title = link.inner_text().strip()
 
-                # Wait for the page to settle instead of a fixed sleep. This
-                # is best-effort: LinkedIn keeps background requests alive,
-                # so a timeout here is not fatal.
-                try:
-                    page.wait_for_load_state("networkidle", timeout=15000)
-                except PlaywrightTimeoutError:
-                    pass
+                url = link.get_attribute("href")
 
-                print("Opening Jobs Search...")
-                page.goto(search_url, wait_until="domcontentloaded", timeout=60000)
+                if url.startswith("/"):
+                    url = "https://www.linkedin.com" + url
 
-                # Wait for the results list (any known layout variant) to
-                # attach to the DOM, instead of sleeping a fixed amount of
-                # time. If nothing shows up, treat it as "no vacancies"
-                # rather than crashing.
-                combined_selector = ", ".join(JOB_CARD_SELECTORS)
-                try:
-                    page.wait_for_selector(combined_selector, timeout=20000)
-                except PlaywrightTimeoutError:
-                    print("\nNo job listings found (empty search results or unrecognized page layout).")
-                    return jobs
+                company = card.locator(
+                    ".artdeco-entity-lockup__subtitle span"
+                ).first.inner_text().strip()
 
-                cards = page.locator(combined_selector)
-                count = min(cards.count(), MAX_JOBS)
+                location = card.locator(
+                    ".artdeco-entity-lockup__caption span"
+                ).first.inner_text().strip()
 
-                for i in range(count):
-                    job = _extract_job(cards.nth(i))
-                    if job:
-                        jobs.append(job)
+                jobs.append(
+                    {
+                        "title": title,
+                        "company": company,
+                        "location": location,
+                        "url": url,
+                    }
+                )
 
-                print(f"\nOpened:\n{search_url}")
+            except Exception as e:
+                print(e)
 
-            finally:
-                context.close()
+        print(f"Jobs found: {len(jobs)}")
+        print(f"New jobs: {len(jobs)}\n")
 
-    except PlaywrightTimeoutError as exc:
-        print(f"\nTimed out while loading LinkedIn: {exc}")
-    except Exception as exc:
-        print(f"\nUnexpected error while scraping LinkedIn: {exc}")
+        for idx, job in enumerate(jobs, 1):
+            print(f"[{idx}] {job['title']}")
+            print(f"Company: {job['company']}")
+            print(f"Location: {job['location']}\n")
 
-    return jobs
+        browser.close()
+        return jobs

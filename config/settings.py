@@ -1,3 +1,5 @@
+from pathlib import Path
+
 LINKEDIN_URL = "https://www.linkedin.com"
 
 SEARCH_KEYWORDS = "Data Analyst"
