@@ -15,6 +15,7 @@ class Job:
     company: str = ""
     location: str = ""
     status: str = "new"
+    description: str = ""  # not yet persisted to SQLite — see save_job()
     id: Optional[int] = None
     created_at: Optional[str] = None
 

@@ -4,7 +4,8 @@ LINKEDIN_URL = "https://www.linkedin.com"
 
 SEARCH_KEYWORDS = "Data Analyst"
 
-SEARCH_LOCATION = "Dubai"
+# One search run happens per location in this list.
+SEARCH_LOCATIONS = ["Dubai", "Abu Dhabi"]
 
 HEADLESS = False
 
