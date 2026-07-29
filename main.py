@@ -1,9 +1,9 @@
 from database import Job, get_all_jobs, init_database, job_exists, save_job
 from scrapers.linkedin import search_jobs
+from llm import gemini
 
 
 def main():
-
     print("=" * 50)
     print("AI Career Copilot v0.1.3")
     print("=" * 50)
@@ -40,6 +40,16 @@ def main():
 
     print(f"New jobs: {new_count}")
     print(f"Skipped: {skipped_count}")
+
+    # --- Добавленный блок тестирования Gemini ---
+    print()
+    print("=" * 60)
+    print("Testing Gemini...")
+    print("=" * 60)
+
+    answer = gemini.ask("Say only: Gemini connected successfully.")
+    print(answer)
+    # --------------------------------------------
 
     if not jobs:
         print("No vacancies to display.")
