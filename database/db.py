@@ -1,23 +1,12 @@
 """SQLite persistence for scraped LinkedIn job vacancies."""
 
 import sqlite3
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+from models import Job
+
 DB_PATH = Path(__file__).resolve().parent / "jobs.db"
-
-
-@dataclass
-class Job:
-    linkedin_url: str
-    title: str
-    company: str = ""
-    location: str = ""
-    status: str = "new"
-    description: str = ""  # not yet persisted to SQLite — see save_job()
-    id: Optional[int] = None
-    created_at: Optional[str] = None
 
 
 def _get_connection() -> sqlite3.Connection:
@@ -46,7 +35,7 @@ def init_database() -> None:
 
 
 def job_exists(url: str) -> bool:
-    """Return True if a job with this linkedin_url is already stored."""
+    """Return True if a job with this url is already stored."""
     if not url:
         return False
 
@@ -61,9 +50,9 @@ def save_job(job: Job) -> bool:
     """Insert a new job into the database.
 
     Returns True if the job was inserted, False if it was skipped
-    (missing url, or a job with this linkedin_url already exists).
+    (missing url, or a job with this url already exists).
     """
-    if not job.linkedin_url:
+    if not job.url:
         return False
 
     with _get_connection() as conn:
@@ -73,7 +62,7 @@ def save_job(job: Job) -> bool:
                 INSERT INTO jobs (linkedin_url, title, company, location, status)
                 VALUES (?, ?, ?, ?, ?)
                 """,
-                (job.linkedin_url, job.title, job.company, job.location, job.status),
+                (job.url, job.title, job.company, job.location, job.status),
             )
             conn.commit()
             return True
@@ -94,13 +83,11 @@ def get_all_jobs() -> list[Job]:
 
     return [
         Job(
-            id=row["id"],
-            linkedin_url=row["linkedin_url"],
+            url=row["linkedin_url"],
             title=row["title"],
             company=row["company"],
             location=row["location"],
             status=row["status"],
-            created_at=row["created_at"],
         )
         for row in rows
     ]

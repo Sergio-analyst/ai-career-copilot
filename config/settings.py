@@ -1,12 +1,18 @@
-from pathlib import Path
+import os
+from dotenv import load_dotenv
 
-LINKEDIN_URL = "https://www.linkedin.com"
+load_dotenv()
 
-SEARCH_KEYWORDS = "Data Analyst"
+LINKEDIN_URL = "https://www.linkedin.com/feed/"
 
-# One search run happens per location in this list.
-SEARCH_LOCATIONS = ["Dubai", "Abu Dhabi"]
+SEARCH_KEYWORDS = "AI Automation Engineer"
+SEARCH_LOCATIONS = [
+    "Dubai",
+    "Abu Dhabi",
+]
+
+PROFILE_DIR = "./browser_profile"
 
 HEADLESS = False
 
-PROFILE_DIR = "browser_profile"
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")

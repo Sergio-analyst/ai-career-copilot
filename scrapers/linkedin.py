@@ -1,5 +1,4 @@
 import random
-from urllib.parse import quote
 from playwright.sync_api import sync_playwright, TimeoutError
 
 from config.settings import (
@@ -9,8 +8,11 @@ from config.settings import (
     PROFILE_DIR,
     HEADLESS,
 )
+from models import Job
+from utils.linkedin_filters import build_search_url
+from parsers.job_parser import JobParser
 
-MAX_JOBS_PER_LOCATION = 10
+MAX_JOBS_PER_LOCATION = 2 
 
 
 def human_delay(min_seconds: float, max_seconds: float) -> None:
@@ -36,10 +38,9 @@ def search_jobs():
         input("Press ENTER after login/verification...")
 
         for location in SEARCH_LOCATIONS:
-            search_url = (
-                "https://www.linkedin.com/jobs/search/"
-                f"?keywords={quote(SEARCH_KEYWORDS)}"
-                f"&location={quote(location)}"
+            search_url = build_search_url(
+                SEARCH_KEYWORDS,
+                location
             )
 
             print(f"\nOpening Jobs Search for: {location}...")
@@ -59,7 +60,7 @@ def search_jobs():
 
             location_jobs = []
 
-            # 1. Собираем базовую информацию (ссылки, названия, компании)
+            # 1. Собираем базовую информацию
             for i in range(total):
                 card = cards.nth(i)
                 try:
@@ -73,12 +74,13 @@ def search_jobs():
                     company = card.locator(".artdeco-entity-lockup__subtitle span").first.inner_text().strip()
                     card_location = card.locator(".artdeco-entity-lockup__caption span").first.inner_text().strip()
 
-                    location_jobs.append({
-                        "title": title,
-                        "company": company,
-                        "location": card_location,
-                        "url": url,
-                    })
+                    job = Job()
+                    job.title = title
+                    job.company = company
+                    job.location = card_location
+                    job.url = url
+
+                    location_jobs.append(job)
                 except Exception as e:
                     print(f"Error parsing card #{i}: {e}")
 
@@ -86,79 +88,102 @@ def search_jobs():
 
             print(f"Found {len(location_jobs)} jobs in {location}. Getting FULL descriptions...\n")
 
-            # 2. Переходим на страницу каждой вакансии за полным описанием
+            # 2. Кликаем по карточкам прямо в результатах поиска
             for idx, job in enumerate(location_jobs, 1):
-                print("=" * 70)
-                print(f"[{idx}/{len(location_jobs)}] {job['title']}")
-                print(f"URL: {job['url']}")
+                card = cards.nth(idx - 1)
+                card.click()
+                page.wait_for_timeout(2500)
 
+                # Раскрываем блок описания
                 try:
-                    human_delay(2.0, 6.0)
+                    page.locator(
+                        "button[aria-label*='Show more']"
+                    ).first.click(timeout=3000)
+                except Exception:
+                    pass
 
-                    page.goto(job["url"], wait_until="domcontentloaded", timeout=30000)
-                    human_delay(1.5, 3.5)
+                # Извлекаем текст описания
+                description = ""
+                possible = [
+                    ".jobs-description-content",
+                    ".jobs-description",
+                    ".jobs-box__html-content",
+                    ".jobs-description__content"
+                ]
 
-                    # Плавная прокрутка документа вниз через JS
-                    page.evaluate("""
-                        window.scrollTo({
-                            top: document.body.scrollHeight,
-                            behavior: 'smooth'
-                        })
-                    """)
-                    human_delay(2.0, 4.0)
-
-                    # Нажимаем "Show more", если кнопка присутствует
+                for s in possible:
                     try:
-                        show_more_btn = page.get_by_role("button", name="Show more")
-                        if show_more_btn.is_visible(timeout=2000):
-                            show_more_btn.click()
-                            human_delay(0.8, 1.8)
+                        txt = page.locator(s).inner_text().strip()
+                        if len(txt) > len(description):
+                            description = txt
                     except Exception:
                         pass
 
-                    selectors = [
-                        ".jobs-description",
-                        ".jobs-description-content__text",
-                        ".jobs-box__html-content",
-                        ".jobs-description__content",
-                        ".jobs-description-content",
-                        ".jobs-box__container",
-                        ".jobs-details",
-                        ".jobs-search__job-details--container",
-                        "#job-details",
-                        "main",
-                    ]
+                job.description = description
 
-                    # Поиск самого длинного текста с печатью селекторов
-                    best_text = ""
-                    for selector in selectors:
-                        try:
-                            loc = page.locator(selector)
+                # Вывод сырого текста вакансии в консоль
+                print()
+                print("=" * 80)
+                print(description[:2500])
+                print("=" * 80)
 
-                            if loc.count() == 0:
-                                continue
+                # Проверка Easy Apply
+                job.easy_apply = False
+                try:
+                    apply_btn = page.locator("button.jobs-apply-button")
+                    if apply_btn.count():
+                        text = apply_btn.first.inner_text().lower()
+                        if "easy apply" in text:
+                            job.easy_apply = True
+                except Exception:
+                    pass
 
-                            text = loc.first.inner_text().strip()
-                            print(f"{selector} {len(text)}")
+                # Проверка длины описания перед парсингом
+                if len(description) < 300:
+                    print("❌ Description too short.")
+                    continue
 
-                            if len(text) > len(best_text):
-                                best_text = text
+                # ---------------- AI PARSER ----------------
+                try:
+                    from ai.gemini_job_parser import parse_job_with_gemini
 
-                        except Exception:
-                            pass
+                    ai_result = parse_job_with_gemini(description)
 
-                    description = best_text
-                    job["description"] = description
-
-                    if description:
-                        print(f"Description length: {len(description)} chars")
-                        print(description[:300] + "...\n")
-                    else:
-                        print("DESCRIPTION NOT FOUND\n")
-
+                    job.salary = ai_result.get("salary", "")
+                    job.requirements = ai_result.get("requirements", [])
+                    job.responsibilities = ai_result.get("responsibilities", [])
+                    job.benefits = ai_result.get("benefits", [])
                 except Exception as e:
-                    print(f"Failed to fetch description for {job['title']}: {e}\n")
-                    job["description"] = ""
+                    print(f"Gemini parser failed: {e}")
+
+                    parsed = JobParser.parse(description)
+
+                    job.salary = parsed["salary"]
+                    job.requirements = parsed["requirements"]
+                    job.responsibilities = parsed["responsibilities"]
+                    job.benefits = parsed["benefits"]
+                # -------------------------------------------
+
+                # Консольный лог
+                print(f"Company: {job.company}")
+                print(f"Position: {job.title}")
+                print(f"Salary: {job.salary}")
+                print(f"Easy Apply: {job.easy_apply}")
+                print(f"Requirements lines parsed: {len(job.requirements)}")
+                print(f"Responsibilities lines parsed: {len(job.responsibilities)}")
+
+                print("\nRequirements")
+                print("-" * 40)
+                print("\n".join(job.requirements[:10]))
+
+                print("\nResponsibilities")
+                print("-" * 40)
+                print("\n".join(job.responsibilities[:10]))
+
+                print("\nBenefits")
+                print("-" * 40)
+                print("\n".join(job.benefits[:10]))
+                print("=" * 70)
 
             all_jobs.extend(location_jobs)
 
